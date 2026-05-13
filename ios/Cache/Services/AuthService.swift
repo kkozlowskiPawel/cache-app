@@ -34,17 +34,32 @@ final class AuthService: ObservableObject {
         }
     }
 
-    func signUp(email: String, password: String) async {
+    /// Returns true if signup succeeded but requires email confirmation (no session yet).
+    @discardableResult
+    func signUp(email: String, password: String) async -> SignUpResult {
         isLoading = true; errorMessage = nil
         defer { isLoading = false }
         do {
-            let response = try await SupabaseService.client.auth.signUp(email: email, password: password)
-            userId = response.user.id
-            self.email = response.user.email
+            let response = try await SupabaseService.client.auth.signUp(
+                email: email,
+                password: password,
+                redirectTo: URL(string: "https://cache.kozlowski.download/auth/callback")
+            )
+            if response.session != nil {
+                userId = response.user.id
+                self.email = response.user.email
+                return .signedIn
+            } else {
+                // confirm email enabled — user needs to click the link
+                return .needsConfirmation
+            }
         } catch {
             errorMessage = error.localizedDescription
+            return .failure
         }
     }
+
+    enum SignUpResult { case signedIn, needsConfirmation, failure }
 
     func signOut() async {
         do {
