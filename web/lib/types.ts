@@ -57,6 +57,7 @@ export interface Bill {
   due_date: string;
   paid: boolean;
   category_id: string | null;
+  account_id: string | null;
   reminder_days_before: number;
 }
 

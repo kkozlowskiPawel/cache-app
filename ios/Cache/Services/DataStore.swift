@@ -196,7 +196,7 @@ final class DataStore: ObservableObject {
 
     // MARK: - Bills
 
-    func addBill(name: String, amount: Double, dueDate: Date, categoryId: UUID?, reminderDays: Int) async {
+    func addBill(name: String, amount: Double, dueDate: Date, categoryId: UUID?, accountId: UUID?, reminderDays: Int) async {
         do {
             let row = BillInsert(
                 user_id: try await currentUserId(),
@@ -204,6 +204,7 @@ final class DataStore: ObservableObject {
                 amount: amount,
                 due_date: DateOnly.string(from: dueDate),
                 category_id: categoryId,
+                account_id: accountId,
                 reminder_days_before: reminderDays
             )
             try await client.from("bills").insert(row).execute()
@@ -217,6 +218,14 @@ final class DataStore: ObservableObject {
                 .update(["paid": !bill.paid])
                 .eq("id", value: bill.id)
                 .execute()
+        } catch { errorMessage = error.localizedDescription }
+    }
+
+    /// Atomowo: tworzy transakcje na dzisiejsza date i oznacza rachunek jako zaplacony.
+    /// Saldo konta jest automatycznie aktualizowane przez trigger.
+    func payBill(_ bill: Bill) async {
+        do {
+            try await client.rpc("pay_bill", params: PayBillParams(bill_id: bill.id)).execute()
         } catch { errorMessage = error.localizedDescription }
     }
 

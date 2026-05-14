@@ -134,6 +134,7 @@ struct Bill: Identifiable, Codable, Hashable {
     var due_date: String
     var paid: Bool
     var category_id: UUID?
+    var account_id: UUID?
     var reminder_days_before: Int
 
     var dueDateValue: Date { DateOnly.date(from: due_date) }
@@ -206,7 +207,12 @@ struct BillInsert: Encodable {
     var due_date: String
     var paid: Bool = false
     var category_id: UUID?
+    var account_id: UUID?
     var reminder_days_before: Int = 3
+}
+
+struct PayBillParams: Encodable {
+    var bill_id: UUID
 }
 
 struct BudgetInsert: Encodable {

@@ -40,8 +40,9 @@ type Ctx = {
   toggleSubscriptionActive: (s: Subscription) => Promise<void>;
   deleteSubscription: (id: string) => Promise<void>;
 
-  addBill: (p: { name: string; amount: number; dueDate: string; categoryId: string | null; reminderDays: number }) => Promise<void>;
+  addBill: (p: { name: string; amount: number; dueDate: string; categoryId: string | null; accountId: string | null; reminderDays: number }) => Promise<void>;
   togglePaid: (b: Bill) => Promise<void>;
+  payBill: (id: string) => Promise<void>;
   deleteBill: (id: string) => Promise<void>;
 
   setBudget: (p: { categoryId: string; amount: number; period: BudgetPeriod }) => Promise<void>;
@@ -170,13 +171,15 @@ export function DataProvider({ userId, children }: { userId: string; children: R
   const toggleSubscriptionActive = async (s: Subscription) => { await supabase.from("subscriptions").update({ active: !s.active }).eq("id", s.id); };
   const deleteSubscription = async (id: string) => { await supabase.from("subscriptions").delete().eq("id", id); };
 
-  const addBill = async (p: { name: string; amount: number; dueDate: string; categoryId: string | null; reminderDays: number }) => {
+  const addBill = async (p: { name: string; amount: number; dueDate: string; categoryId: string | null; accountId: string | null; reminderDays: number }) => {
     await supabase.from("bills").insert({
       user_id: userId, name: p.name, amount: p.amount, due_date: p.dueDate,
-      category_id: p.categoryId, reminder_days_before: p.reminderDays,
+      category_id: p.categoryId, account_id: p.accountId,
+      reminder_days_before: p.reminderDays,
     });
   };
   const togglePaid = async (b: Bill) => { await supabase.from("bills").update({ paid: !b.paid }).eq("id", b.id); };
+  const payBill = async (id: string) => { await supabase.rpc("pay_bill", { bill_id: id }); };
   const deleteBill = async (id: string) => { await supabase.from("bills").delete().eq("id", id); };
 
   const setBudget = async (p: { categoryId: string; amount: number; period: BudgetPeriod }) => {
@@ -223,7 +226,7 @@ export function DataProvider({ userId, children }: { userId: string; children: R
     monthlyIncome, monthlyExpenses, netWorth, monthlySubscriptionsTotal, currentMonthExpenseForCategory,
     addTransaction, updateTransaction, deleteTransaction,
     addSubscription, toggleSubscriptionActive, deleteSubscription,
-    addBill, togglePaid, deleteBill,
+    addBill, togglePaid, payBill, deleteBill,
     setBudget, deleteBudget,
     addGoal, updateGoalCurrent, deleteGoal,
     addAccount, deleteAccount,
