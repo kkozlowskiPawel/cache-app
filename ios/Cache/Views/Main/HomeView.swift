@@ -6,13 +6,14 @@ struct HomeView: View {
 
     @State private var selectedCalendarDate: DateComponents? = nil
     @State private var chartMode: ChartMode = .daily
+    @State private var selectedAccountId: UUID? = nil   // nil = wszystkie
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
+                    accountCarousel
                     monthSummary
-                    statsRow
                     calendarCard
                     chartsCard
                     upcomingBillsCard
@@ -21,26 +22,216 @@ struct HomeView: View {
             }
             .background(Color(.systemGroupedBackground))
             .navigationTitle("Dashboard")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        Button {
+                            withAnimation { selectedAccountId = nil }
+                        } label: {
+                            Label("Wszystkie konta", systemImage: selectedAccountId == nil ? "checkmark" : "")
+                        }
+                        Divider()
+                        ForEach(data.accounts) { a in
+                            Button {
+                                withAnimation { selectedAccountId = a.id }
+                            } label: {
+                                Label(a.name, systemImage: selectedAccountId == a.id ? "checkmark" : "")
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text(selectedAccountLabel)
+                                .font(.subheadline.weight(.medium))
+                            Image(systemName: "chevron.down")
+                                .font(.caption2.weight(.semibold))
+                        }
+                        .foregroundStyle(.primary)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(Color(.secondarySystemBackground), in: Capsule())
+                    }
+                }
+            }
             .refreshable { await data.loadAll() }
         }
     }
 
-    // MARK: - Month summary
+    // MARK: - Filtering
 
-    private var savings: Double { data.monthlyIncome - data.monthlyExpenses }
+    private var filteredTransactions: [Transaction] {
+        guard let aid = selectedAccountId else { return data.transactions }
+        return data.transactions.filter { $0.account_id == aid }
+    }
+
+    private var selectedAccount: Account? {
+        guard let aid = selectedAccountId else { return nil }
+        return data.accounts.first { $0.id == aid }
+    }
+
+    private var selectedAccountLabel: String {
+        selectedAccount?.name ?? "Wszystkie"
+    }
+
+    private var monthlyIncome: Double {
+        let cal = Calendar.current; let now = Date()
+        return filteredTransactions
+            .filter { $0.amount > 0 && cal.isDate($0.dateValue, equalTo: now, toGranularity: .month) }
+            .reduce(0) { $0 + $1.amount }
+    }
+    private var monthlyExpenses: Double {
+        let cal = Calendar.current; let now = Date()
+        return filteredTransactions
+            .filter { $0.amount < 0 && cal.isDate($0.dateValue, equalTo: now, toGranularity: .month) }
+            .reduce(0) { $0 + abs($1.amount) }
+    }
+    private var savings: Double { monthlyIncome - monthlyExpenses }
+
+    // MARK: - Account carousel
+
+    private struct AccountSummary: Identifiable {
+        let id: String   // "all" or UUID.uuidString
+        let title: String
+        let subtitle: String
+        let balance: Double
+        let income: Double
+        let expense: Double
+        let systemIcon: String
+    }
+
+    private var accountSummaries: [AccountSummary] {
+        let cal = Calendar.current; let now = Date()
+
+        // Per-account monthly aggregates from ALL transactions (carousel pokazuje wszystko)
+        var perAcc: [UUID: (inc: Double, exp: Double)] = [:]
+        for tx in data.transactions {
+            guard let aid = tx.account_id,
+                  cal.isDate(tx.dateValue, equalTo: now, toGranularity: .month) else { continue }
+            var cur = perAcc[aid] ?? (0, 0)
+            if tx.amount > 0 { cur.inc += tx.amount } else { cur.exp += abs(tx.amount) }
+            perAcc[aid] = cur
+        }
+        let totalInc = perAcc.values.reduce(0) { $0 + $1.inc }
+        let totalExp = perAcc.values.reduce(0) { $0 + $1.exp }
+
+        var out: [AccountSummary] = [
+            AccountSummary(
+                id: "all",
+                title: "Wartość netto",
+                subtitle: "\(data.accounts.count) kont",
+                balance: data.netWorth,
+                income: totalInc,
+                expense: totalExp,
+                systemIcon: "creditcard.fill"
+            )
+        ]
+        for a in data.accounts {
+            let agg = perAcc[a.id] ?? (0, 0)
+            out.append(AccountSummary(
+                id: a.id.uuidString,
+                title: a.name,
+                subtitle: a.type.label,
+                balance: a.balance,
+                income: agg.inc,
+                expense: agg.exp,
+                systemIcon: iconForAccountType(a.type)
+            ))
+        }
+        return out
+    }
+
+    private func iconForAccountType(_ t: AccountType) -> String {
+        switch t {
+        case .cash: "banknote.fill"
+        case .checking: "building.columns.fill"
+        case .savings: "wallet.pass.fill"
+        case .credit_card: "creditcard.fill"
+        case .investment: "chart.line.uptrend.xyaxis"
+        case .loan: "doc.text.fill"
+        }
+    }
+
+    private var accountCarousel: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 12) {
+                ForEach(accountSummaries) { s in
+                    let isSelected = (s.id == "all" && selectedAccountId == nil)
+                        || (selectedAccountId?.uuidString == s.id)
+                    Button {
+                        withAnimation {
+                            selectedAccountId = (s.id == "all") ? nil : UUID(uuidString: s.id)
+                        }
+                    } label: {
+                        accountCard(s, selected: isSelected)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 2)
+        }
+        .scrollClipDisabled()
+    }
+
+    private func accountCard(_ s: AccountSummary, selected: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: s.systemIcon)
+                    .font(.callout)
+                    .foregroundStyle(selected ? .white : .accentColor)
+                    .frame(width: 28, height: 28)
+                    .background(
+                        Circle().fill(selected ? Color.white.opacity(0.2) : Color.accentColor.opacity(0.15))
+                    )
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(s.title)
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
+                    Text(s.subtitle)
+                        .font(.caption2)
+                        .foregroundStyle(selected ? .white.opacity(0.75) : .secondary)
+                        .lineLimit(1)
+                }
+            }
+            Text(s.balance, format: .currency(code: "PLN"))
+                .font(.title3.bold().monospacedDigit())
+                .lineLimit(1).minimumScaleFactor(0.7)
+            HStack {
+                Text("+\(s.income, format: .currency(code: "PLN"))")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(selected ? .white.opacity(0.9) : .green)
+                Spacer()
+                Text("-\(s.expense, format: .currency(code: "PLN"))")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(selected ? .white.opacity(0.9) : .red)
+            }
+        }
+        .padding(14)
+        .frame(width: 220, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(selected ? Color.accentColor : Color(.secondarySystemGroupedBackground))
+        )
+        .foregroundStyle(selected ? .white : .primary)
+        .shadow(color: selected ? .accentColor.opacity(0.25) : .clear, radius: 8, y: 3)
+    }
+
+    // MARK: - Month summary
 
     private var monthSummary: some View {
         DashCard {
             HStack(alignment: .firstTextBaseline) {
                 Text("Ten miesiąc").font(.headline)
+                if selectedAccount != nil {
+                    Text("· \(selectedAccountLabel)")
+                        .font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                }
                 Spacer()
                 Text(Date(), format: .dateTime.month(.wide).year())
                     .font(.footnote).foregroundStyle(.secondary)
             }
             HStack(spacing: 12) {
-                statTile(title: "Przychód",   value: data.monthlyIncome,   color: .green,  icon: "arrow.down.circle.fill")
-                statTile(title: "Wydatki",    value: data.monthlyExpenses, color: .red,    icon: "arrow.up.circle.fill")
-                statTile(title: "Oszczędn.",  value: savings,              color: savings >= 0 ? .blue : .orange, icon: "banknote.fill")
+                statTile(title: "Przychód",  value: monthlyIncome,   color: .green,  icon: "arrow.down.circle.fill")
+                statTile(title: "Wydatki",   value: monthlyExpenses, color: .red,    icon: "arrow.up.circle.fill")
+                statTile(title: "Oszczędn.", value: savings,         color: savings >= 0 ? .blue : .orange, icon: "banknote.fill")
             }
         }
     }
@@ -55,34 +246,12 @@ struct HomeView: View {
         .frame(maxWidth: .infinity)
     }
 
-    // MARK: - Net worth + Subscriptions row
-
-    private var statsRow: some View {
-        HStack(spacing: 12) {
-            DashCard(compact: true) {
-                Text("Wartość netto").font(.subheadline.bold())
-                Text(data.netWorth, format: .currency(code: "PLN"))
-                    .font(.system(.title2, design: .rounded, weight: .bold))
-                    .lineLimit(1).minimumScaleFactor(0.6)
-                Text("\(data.accounts.count) kont").font(.caption2).foregroundStyle(.secondary)
-            }
-            DashCard(compact: true) {
-                Text("Subskrypcje").font(.subheadline.bold())
-                Text(data.monthlySubscriptionsTotal, format: .currency(code: "PLN"))
-                    .font(.system(.title2, design: .rounded, weight: .bold))
-                    .lineLimit(1).minimumScaleFactor(0.6)
-                Text("miesięcznie").font(.caption2).foregroundStyle(.secondary)
-            }
-        }
-    }
-
     // MARK: - Calendar
 
-    /// Dictionary <DateComponents(y,m,d) -> suma wydatków>.
     private var dailyExpenseTotals: [DateComponents: Double] {
         let cal = Calendar(identifier: .gregorian)
         var dict: [DateComponents: Double] = [:]
-        for tx in data.transactions where tx.amount < 0 {
+        for tx in filteredTransactions where tx.amount < 0 {
             let d = tx.dateValue
             let key = DateComponents(
                 calendar: cal,
@@ -108,7 +277,7 @@ struct HomeView: View {
         guard let dc = selectedCalendarDate,
               let day = Calendar(identifier: .gregorian).date(from: dc) else { return [] }
         let cal = Calendar.current
-        return data.transactions.filter { cal.isDate($0.dateValue, inSameDayAs: day) }
+        return filteredTransactions.filter { cal.isDate($0.dateValue, inSameDayAs: day) }
     }
 
     private var calendarCard: some View {
@@ -123,7 +292,6 @@ struct HomeView: View {
                         .monospacedDigit()
                 }
             }
-
             ExpenseCalendarView(
                 dailyTotals: dailyExpenseTotals,
                 selectedDate: $selectedCalendarDate
@@ -200,13 +368,11 @@ struct HomeView: View {
         for offset in (0...29).reversed() {
             if let d = cal.date(byAdding: .day, value: -offset, to: today) { dict[d] = 0 }
         }
-        for tx in data.transactions where tx.amount < 0 {
+        for tx in filteredTransactions where tx.amount < 0 {
             let day = cal.startOfDay(for: tx.dateValue)
             if dict[day] != nil { dict[day, default: 0] += abs(tx.amount) }
         }
-        return dict
-            .sorted { $0.key < $1.key }
-            .map { ChartBucket(label: "", date: $0.key, amount: $0.value) }
+        return dict.sorted { $0.key < $1.key }.map { ChartBucket(label: "", date: $0.key, amount: $0.value) }
     }
 
     private var weeklyBuckets: [ChartBucket] {
@@ -216,20 +382,17 @@ struct HomeView: View {
         for offset in (0...11).reversed() {
             if let d = cal.date(byAdding: .weekOfYear, value: -offset, to: thisWeekStart) { dict[d] = 0 }
         }
-        for tx in data.transactions where tx.amount < 0 {
-            if let weekStart = cal.dateInterval(of: .weekOfYear, for: tx.dateValue)?.start,
-               dict[weekStart] != nil {
-                dict[weekStart, default: 0] += abs(tx.amount)
+        for tx in filteredTransactions where tx.amount < 0 {
+            if let ws = cal.dateInterval(of: .weekOfYear, for: tx.dateValue)?.start, dict[ws] != nil {
+                dict[ws, default: 0] += abs(tx.amount)
             }
         }
-        return dict
-            .sorted { $0.key < $1.key }
-            .map { ChartBucket(label: "", date: $0.key, amount: $0.value) }
+        return dict.sorted { $0.key < $1.key }.map { ChartBucket(label: "", date: $0.key, amount: $0.value) }
     }
 
     private var categoryBuckets: [CategoryBucket] {
         var dict: [UUID: Double] = [:]
-        for tx in data.transactions where tx.amount < 0 {
+        for tx in filteredTransactions where tx.amount < 0 {
             if let cid = tx.category_id {
                 dict[cid, default: 0] += abs(tx.amount)
             }
@@ -253,8 +416,8 @@ struct HomeView: View {
             .pickerStyle(.segmented)
 
             switch chartMode {
-            case .daily:     dailyChart
-            case .weekly:    weeklyChart
+            case .daily:      dailyChart
+            case .weekly:     weeklyChart
             case .categories: categoriesChart
             }
         }
@@ -278,7 +441,7 @@ struct HomeView: View {
                 }
                 .frame(height: 200)
                 .chartXAxis {
-                    AxisMarks(values: .stride(by: .day, count: 5)) { value in
+                    AxisMarks(values: .stride(by: .day, count: 5)) { _ in
                         AxisGridLine()
                         AxisValueLabel(format: .dateTime.day().month(.narrow))
                     }
@@ -313,7 +476,7 @@ struct HomeView: View {
                 }
                 .frame(height: 220)
                 .chartXAxis {
-                    AxisMarks(values: .stride(by: .weekOfYear)) { value in
+                    AxisMarks(values: .stride(by: .weekOfYear)) { _ in
                         AxisGridLine()
                         AxisValueLabel(format: .dateTime.day().month(.narrow))
                     }
@@ -387,6 +550,7 @@ struct HomeView: View {
     private var upcomingBillsCard: some View {
         let upcoming = data.bills
             .filter { !$0.paid && $0.dueDateValue >= Calendar.current.startOfDay(for: Date()) }
+            .filter { selectedAccountId == nil ? true : $0.account_id == selectedAccountId }
             .prefix(5)
 
         return DashCard {
