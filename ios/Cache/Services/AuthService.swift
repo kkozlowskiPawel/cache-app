@@ -89,7 +89,7 @@ final class AuthService: ObservableObject {
         do {
             try await SupabaseService.client.auth.resetPasswordForEmail(
                 email,
-                redirectTo: URL(string: "https://cache.kozlowski.download/auth/callback?next=/reset-password")
+                redirectTo: URL(string: "https://cache.kozlowski.download/auth/reset")
             )
             return true
         } catch {
