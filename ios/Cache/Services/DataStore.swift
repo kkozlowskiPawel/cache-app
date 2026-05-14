@@ -129,6 +129,7 @@ final class DataStore: ObservableObject {
         categoryId: UUID?,
         accountId: UUID?,
         notes: String?,
+        type: CategoryType = .expense,
         firstPaymentDate: Date? = nil
     ) async {
         do {
@@ -141,22 +142,41 @@ final class DataStore: ObservableObject {
                 next_billing_date: DateOnly.string(from: nextDate),
                 category_id: categoryId,
                 account_id: accountId,
-                notes: notes
+                notes: notes,
+                type: type
             )
             try await client.from("subscriptions").insert(row).execute()
 
             if let firstDate = firstPaymentDate {
+                let signed = type == .income ? amount : -amount
+                let desc = type == .income ? "Przychód: \(name)" : "Subskrypcja: \(name)"
                 let tx = TransactionInsert(
                     user_id: userId,
                     account_id: accountId,
                     category_id: categoryId,
-                    amount: -amount,
-                    description: "Subskrypcja: \(name)",
+                    amount: signed,
+                    description: desc,
                     date: DateOnly.string(from: firstDate),
                     is_recurring: true
                 )
                 try await client.from("transactions").insert(tx).execute()
             }
+        } catch { errorMessage = error.localizedDescription }
+    }
+
+    func updateTransaction(_ tx: Transaction, amount: Double, description: String, date: Date, categoryId: UUID?, accountId: UUID?) async {
+        do {
+            let payload = TransactionUpdate(
+                account_id: accountId,
+                category_id: categoryId,
+                amount: amount,
+                description: description,
+                date: DateOnly.string(from: date)
+            )
+            try await client.from("transactions")
+                .update(payload)
+                .eq("id", value: tx.id)
+                .execute()
         } catch { errorMessage = error.localizedDescription }
     }
 

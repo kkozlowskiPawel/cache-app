@@ -46,6 +46,7 @@ export interface Subscription {
   color: string;
   active: boolean;
   notes: string | null;
+  type: CategoryType;
 }
 
 export interface Bill {

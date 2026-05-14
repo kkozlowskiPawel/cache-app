@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type {
   Account, Bill, Budget, Category, Goal, Subscription, Transaction,
-  AccountType, BillingCycle, BudgetPeriod,
+  AccountType, BillingCycle, BudgetPeriod, CategoryType,
 } from "@/lib/types";
 import { BILLING_CYCLE_MONTHLY_FACTOR } from "@/lib/types";
 import { isSameMonth } from "@/lib/format";
@@ -33,9 +33,10 @@ type Ctx = {
 
   // mutations
   addTransaction: (p: { amount: number; description: string; date: string; categoryId: string | null; accountId: string | null }) => Promise<void>;
+  updateTransaction: (id: string, p: { amount: number; description: string; date: string; categoryId: string | null; accountId: string | null }) => Promise<void>;
   deleteTransaction: (id: string) => Promise<void>;
 
-  addSubscription: (p: { name: string; amount: number; cycle: BillingCycle; nextDate: string; categoryId: string | null; accountId: string | null; notes: string | null; firstPaymentDate: string | null }) => Promise<void>;
+  addSubscription: (p: { name: string; amount: number; cycle: BillingCycle; nextDate: string; categoryId: string | null; accountId: string | null; notes: string | null; firstPaymentDate: string | null; type: CategoryType }) => Promise<void>;
   toggleSubscriptionActive: (s: Subscription) => Promise<void>;
   deleteSubscription: (id: string) => Promise<void>;
 
@@ -134,21 +135,33 @@ export function DataProvider({ userId, children }: { userId: string; children: R
       date: p.date,
     });
   };
+  const updateTransaction = async (id: string, p: { amount: number; description: string; date: string; categoryId: string | null; accountId: string | null }) => {
+    await supabase.from("transactions").update({
+      amount: p.amount,
+      description: p.description,
+      date: p.date,
+      category_id: p.categoryId,
+      account_id: p.accountId,
+    }).eq("id", id);
+  };
   const deleteTransaction = async (id: string) => { await supabase.from("transactions").delete().eq("id", id); };
 
-  const addSubscription = async (p: { name: string; amount: number; cycle: BillingCycle; nextDate: string; categoryId: string | null; accountId: string | null; notes: string | null; firstPaymentDate: string | null }) => {
+  const addSubscription = async (p: { name: string; amount: number; cycle: BillingCycle; nextDate: string; categoryId: string | null; accountId: string | null; notes: string | null; firstPaymentDate: string | null; type: CategoryType }) => {
     await supabase.from("subscriptions").insert({
       user_id: userId, name: p.name, amount: p.amount,
       billing_cycle: p.cycle, next_billing_date: p.nextDate,
       category_id: p.categoryId, account_id: p.accountId, notes: p.notes,
+      type: p.type,
     });
     if (p.firstPaymentDate) {
+      const signed = p.type === "income" ? p.amount : -p.amount;
+      const desc = p.type === "income" ? `Przychód: ${p.name}` : `Subskrypcja: ${p.name}`;
       await supabase.from("transactions").insert({
         user_id: userId,
         account_id: p.accountId,
         category_id: p.categoryId,
-        amount: -p.amount,
-        description: `Subskrypcja: ${p.name}`,
+        amount: signed,
+        description: desc,
         date: p.firstPaymentDate,
         is_recurring: true,
       });
@@ -196,7 +209,9 @@ export function DataProvider({ userId, children }: { userId: string; children: R
   const monthlyExpenses = transactions.filter((t) => t.amount < 0 && isSameMonth(t.date)).reduce((s, t) => s + Math.abs(t.amount), 0);
   const monthlyIncome = transactions.filter((t) => t.amount > 0 && isSameMonth(t.date)).reduce((s, t) => s + t.amount, 0);
   const netWorth = accounts.reduce((s, a) => s + a.balance, 0);
-  const monthlySubscriptionsTotal = subscriptions.filter((s) => s.active).reduce((sum, s) => sum + s.amount * BILLING_CYCLE_MONTHLY_FACTOR[s.billing_cycle], 0);
+  const monthlySubscriptionsTotal = subscriptions
+    .filter((s) => s.active && s.type === "expense")
+    .reduce((sum, s) => sum + s.amount * BILLING_CYCLE_MONTHLY_FACTOR[s.billing_cycle], 0);
   const currentMonthExpenseForCategory = (cid: string) =>
     transactions.filter((t) => t.category_id === cid && t.amount < 0 && isSameMonth(t.date))
       .reduce((s, t) => s + Math.abs(t.amount), 0);
@@ -206,7 +221,7 @@ export function DataProvider({ userId, children }: { userId: string; children: R
     categories, accounts, transactions, subscriptions, bills, budgets, goals,
     categoryById, accountById,
     monthlyIncome, monthlyExpenses, netWorth, monthlySubscriptionsTotal, currentMonthExpenseForCategory,
-    addTransaction, deleteTransaction,
+    addTransaction, updateTransaction, deleteTransaction,
     addSubscription, toggleSubscriptionActive, deleteSubscription,
     addBill, togglePaid, deleteBill,
     setBudget, deleteBudget,

@@ -5,11 +5,13 @@ import { useData } from "@/lib/data-context";
 import { formatCurrency, formatDate, todayISO } from "@/lib/format";
 import { getLastAccountId, setLastAccountId } from "@/lib/last-account";
 import Modal, { inputCls, labelCls, btnPrimary, btnSecondary } from "@/components/Modal";
-import { Plus, Trash2 } from "lucide-react";
+import { Plus, Trash2, Pencil } from "lucide-react";
+import type { Transaction } from "@/lib/types";
 
 export default function TransactionsPage() {
   const d = useData();
-  const [open, setOpen] = useState(false);
+  const [openAdd, setOpenAdd] = useState(false);
+  const [editing, setEditing] = useState<Transaction | null>(null);
 
   const grouped = d.transactions.reduce<Record<string, typeof d.transactions>>((acc, t) => {
     (acc[t.date] ??= []).push(t);
@@ -21,7 +23,7 @@ export default function TransactionsPage() {
     <div className="p-8 max-w-4xl">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-3xl font-bold">Wydatki</h1>
-        <button onClick={() => setOpen(true)} className={btnPrimary}>
+        <button onClick={() => setOpenAdd(true)} className={btnPrimary}>
           <span className="inline-flex items-center gap-2"><Plus className="w-4 h-4" />Nowa transakcja</span>
         </button>
       </div>
@@ -40,7 +42,7 @@ export default function TransactionsPage() {
                   const cat = d.categoryById(t.category_id);
                   const acc = d.accountById(t.account_id);
                   return (
-                    <li key={t.id} className="flex items-center gap-3 px-4 py-3 group">
+                    <li key={t.id} className="flex items-center gap-3 px-4 py-3 group hover:bg-zinc-50 dark:hover:bg-zinc-800/50 cursor-pointer" onClick={() => setEditing(t)}>
                       <div className="w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold" style={{ backgroundColor: (cat?.color ?? "#8E8E93") + "33", color: cat?.color ?? "#8E8E93" }}>
                         {cat?.name?.[0] ?? "—"}
                       </div>
@@ -49,7 +51,8 @@ export default function TransactionsPage() {
                         {acc && <div className="text-xs text-zinc-500">{acc.name}</div>}
                       </div>
                       <div className={`font-semibold tabular-nums ${t.amount < 0 ? "text-red-500" : "text-green-500"}`}>{formatCurrency(t.amount)}</div>
-                      <button onClick={() => d.deleteTransaction(t.id)} className="opacity-0 group-hover:opacity-100 text-zinc-400 hover:text-red-500 transition" title="Usuń"><Trash2 className="w-4 h-4" /></button>
+                      <button onClick={(e) => { e.stopPropagation(); setEditing(t); }} className="opacity-0 group-hover:opacity-100 text-zinc-400 hover:text-blue-500 transition" title="Edytuj"><Pencil className="w-4 h-4" /></button>
+                      <button onClick={(e) => { e.stopPropagation(); d.deleteTransaction(t.id); }} className="opacity-0 group-hover:opacity-100 text-zinc-400 hover:text-red-500 transition" title="Usuń"><Trash2 className="w-4 h-4" /></button>
                     </li>
                   );
                 })}
@@ -59,25 +62,29 @@ export default function TransactionsPage() {
         </div>
       )}
 
-      {open && <AddTransactionModal onClose={() => setOpen(false)} />}
+      {openAdd && <TransactionEditorModal onClose={() => setOpenAdd(false)} />}
+      {editing && <TransactionEditorModal editing={editing} onClose={() => setEditing(null)} />}
     </div>
   );
 }
 
-function AddTransactionModal({ onClose }: { onClose: () => void }) {
+function TransactionEditorModal({ editing, onClose }: { editing?: Transaction; onClose: () => void }) {
   const d = useData();
-  const [isExpense, setIsExpense] = useState(true);
-  const [amount, setAmount] = useState("");
-  const [description, setDescription] = useState("");
-  const [date, setDate] = useState(todayISO());
-  const [categoryId, setCategoryId] = useState<string>("");
-  const [accountId, setAccountId] = useState<string>("");
+  const isEdit = !!editing;
+
+  const [isExpense, setIsExpense] = useState(editing ? editing.amount < 0 : true);
+  const [amount, setAmount] = useState(editing ? String(Math.abs(editing.amount)) : "");
+  const [description, setDescription] = useState(editing?.description ?? "");
+  const [date, setDate] = useState(editing?.date ?? todayISO());
+  const [categoryId, setCategoryId] = useState<string>(editing?.category_id ?? "");
+  const [accountId, setAccountId] = useState<string>(editing?.account_id ?? "");
   const [justSaved, setJustSaved] = useState(false);
 
   useEffect(() => {
+    if (isEdit) return;
     const last = getLastAccountId();
     if (last && d.accounts.some((a) => a.id === last)) setAccountId(last);
-  }, [d.accounts]);
+  }, [d.accounts, isEdit]);
 
   const cats = d.categories.filter((c) => c.type === (isExpense ? "expense" : "income"));
   const num = parseFloat(amount.replace(",", "."));
@@ -86,7 +93,17 @@ function AddTransactionModal({ onClose }: { onClose: () => void }) {
   async function performSave(): Promise<boolean> {
     if (!valid) return false;
     const signed = isExpense ? -Math.abs(num) : Math.abs(num);
-    await d.addTransaction({ amount: signed, description, date, categoryId: categoryId || null, accountId: accountId || null });
+    if (editing) {
+      await d.updateTransaction(editing.id, {
+        amount: signed, description, date,
+        categoryId: categoryId || null, accountId: accountId || null,
+      });
+    } else {
+      await d.addTransaction({
+        amount: signed, description, date,
+        categoryId: categoryId || null, accountId: accountId || null,
+      });
+    }
     if (accountId) setLastAccountId(accountId);
     return true;
   }
@@ -97,7 +114,6 @@ function AddTransactionModal({ onClose }: { onClose: () => void }) {
 
   async function saveAndAddAnother() {
     if (await performSave()) {
-      // Wyczysc pola wartosci, zachowaj typ/date/kategorie/konto dla szybkiego masowego wpisywania.
       setAmount("");
       setDescription("");
       setJustSaved(true);
@@ -106,9 +122,9 @@ function AddTransactionModal({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <Modal open onClose={onClose} title="Nowa transakcja" footer={<>
+    <Modal open onClose={onClose} title={isEdit ? "Edytuj transakcję" : "Nowa transakcja"} footer={<>
       <button onClick={onClose} className={btnSecondary}>Anuluj</button>
-      <button onClick={saveAndAddAnother} disabled={!valid} className={btnSecondary}>Zapisz i dodaj kolejny</button>
+      {!isEdit && <button onClick={saveAndAddAnother} disabled={!valid} className={btnSecondary}>Zapisz i dodaj kolejny</button>}
       <button onClick={saveAndClose} disabled={!valid} className={btnPrimary}>Zapisz</button>
     </>}>
       <div className="space-y-3">

@@ -4,33 +4,49 @@ struct SubscriptionsView: View {
     @EnvironmentObject var data: DataStore
     @State private var showAdd = false
 
+    var monthlyExpense: Double {
+        data.subscriptions.filter { $0.active && $0.type == .expense }
+            .reduce(0) { $0 + $1.monthlyEquivalent }
+    }
+    var monthlyIncome: Double {
+        data.subscriptions.filter { $0.active && $0.type == .income }
+            .reduce(0) { $0 + $1.monthlyEquivalent }
+    }
+
     var body: some View {
         NavigationStack {
             Group {
                 if data.subscriptions.isEmpty {
                     ContentUnavailableView(
-                        "Brak subskrypcji",
+                        "Brak pozycji cyklicznych",
                         systemImage: "repeat",
-                        description: Text("Dodaj subskrypcje plusem w prawym górnym rogu.")
+                        description: Text("Dodaj subskrypcję, wydatek lub przychód cykliczny plusem w prawym górnym rogu.")
                     )
                 } else {
                     List {
                         Section {
-                            HStack {
-                                VStack(alignment: .leading) {
-                                    Text("Łącznie miesięcznie").font(.subheadline).foregroundStyle(.secondary)
-                                    Text(data.monthlySubscriptionsTotal, format: .currency(code: "PLN"))
-                                        .font(.title.bold())
+                            VStack(spacing: 6) {
+                                HStack {
+                                    Text("Wydatki / mies.").font(.caption).foregroundStyle(.secondary)
+                                    Spacer()
+                                    Text(monthlyExpense, format: .currency(code: "PLN")).foregroundStyle(.red).monospacedDigit()
                                 }
-                                Spacer()
-                                VStack(alignment: .trailing) {
-                                    Text("Rocznie").font(.subheadline).foregroundStyle(.secondary)
-                                    Text(data.monthlySubscriptionsTotal * 12, format: .currency(code: "PLN"))
-                                        .font(.title3)
+                                HStack {
+                                    Text("Przychody / mies.").font(.caption).foregroundStyle(.secondary)
+                                    Spacer()
+                                    Text(monthlyIncome, format: .currency(code: "PLN")).foregroundStyle(.green).monospacedDigit()
+                                }
+                                Divider()
+                                HStack {
+                                    Text("Saldo").font(.subheadline.bold())
+                                    Spacer()
+                                    Text(monthlyIncome - monthlyExpense, format: .currency(code: "PLN"))
+                                        .foregroundStyle(monthlyIncome - monthlyExpense >= 0 ? .green : .red)
+                                        .bold().monospacedDigit()
                                 }
                             }
                         }
-                        Section("Subskrypcje") {
+                        Section("Pozycje") {
                             ForEach(data.subscriptions) { sub in
                                 SubscriptionRow(sub: sub)
                             }
@@ -43,7 +59,7 @@ struct SubscriptionsView: View {
                     .listStyle(.insetGrouped)
                 }
             }
-            .navigationTitle("Subskrypcje")
+            .navigationTitle("Cykliczne")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { showAdd = true } label: { Image(systemName: "plus") }
@@ -59,21 +75,38 @@ private struct SubscriptionRow: View {
     let sub: Subscription
 
     var body: some View {
+        let isIncome = sub.type == .income
         HStack(spacing: 12) {
             ZStack {
                 Circle().fill(Color(hex: sub.color).opacity(0.2))
-                Image(systemName: sub.icon).foregroundStyle(Color(hex: sub.color))
+                Image(systemName: isIncome ? "arrow.down.circle.fill" : sub.icon)
+                    .foregroundStyle(isIncome ? Color.green : Color(hex: sub.color))
             }
             .frame(width: 40, height: 40)
 
-            VStack(alignment: .leading) {
-                Text(sub.name).font(.body).strikethrough(!sub.active)
-                Text("Następna: \(sub.nextBillingDateValue, style: .date)")
-                    .font(.caption).foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(sub.name).font(.body).strikethrough(!sub.active)
+                    if isIncome {
+                        Text("Przychód").font(.caption2).bold()
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(Color.green.opacity(0.15), in: Capsule())
+                            .foregroundStyle(.green)
+                    }
+                }
+                if let acc = data.account(id: sub.account_id) {
+                    Text("\(sub.nextBillingDateValue, style: .date) · \(acc.name)")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else {
+                    Text(sub.nextBillingDateValue, style: .date)
+                        .font(.caption).foregroundStyle(.secondary)
+                }
             }
             Spacer()
             VStack(alignment: .trailing) {
-                Text(sub.amount, format: .currency(code: "PLN")).bold()
+                Text("\(isIncome ? "+" : "")\(sub.amount, format: .currency(code: "PLN"))")
+                    .bold()
+                    .foregroundStyle(isIncome ? .green : .primary)
                 Text(sub.billing_cycle.label).font(.caption2).foregroundStyle(.secondary)
             }
         }
@@ -92,6 +125,7 @@ struct AddSubscriptionSheet: View {
     @EnvironmentObject var data: DataStore
     @Environment(\.dismiss) private var dismiss
 
+    @State private var type: CategoryType = .expense
     @State private var name = ""
     @State private var amount: Double?
     @State private var cycle: BillingCycle = .monthly
@@ -105,29 +139,39 @@ struct AddSubscriptionSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Nazwa") {
-                    TextField("np. Netflix, Spotify", text: $name)
+                Section("Typ") {
+                    Picker("Typ", selection: $type) {
+                        Text("Wydatek").tag(CategoryType.expense)
+                        Text("Przychód").tag(CategoryType.income)
+                    }
+                    .pickerStyle(.segmented)
+                    .onChange(of: type) { _, _ in categoryId = nil }
                 }
-                Section("Płatność") {
+                Section("Nazwa") {
+                    TextField(type == .income ? "np. Wypłata" : "np. Netflix, Rata kredytu", text: $name)
+                }
+                Section(type == .income ? "Wpływ" : "Płatność") {
                     TextField("Kwota", value: $amount, format: .number)
                         .keyboardType(.decimalPad)
                     Picker("Cykl", selection: $cycle) {
                         ForEach(BillingCycle.allCases) { Text($0.label).tag($0) }
                     }
-                    DatePicker("Następna płatność", selection: $nextDate, displayedComponents: .date)
+                    DatePicker(type == .income ? "Najbliższy wpływ" : "Następna płatność", selection: $nextDate, displayedComponents: .date)
                 }
                 Section {
-                    Toggle("Już zapłaciłem pierwszą ratę", isOn: $hasFirstPayment)
+                    Toggle(type == .income ? "Już otrzymałem pierwszy wpływ" : "Już zapłaciłem pierwszą ratę", isOn: $hasFirstPayment)
                     if hasFirstPayment {
-                        DatePicker("Data pierwszej płatności", selection: $firstPaymentDate, displayedComponents: .date)
+                        DatePicker("Data", selection: $firstPaymentDate, displayedComponents: .date)
                     }
                 } footer: {
                     if hasFirstPayment {
-                        Text("Utworzymy transakcję historyczną i odejmiemy kwotę od wybranego konta.")
+                        Text(type == .income
+                             ? "Utworzymy transakcję historyczną i dodamy kwotę do wybranego konta."
+                             : "Utworzymy transakcję historyczną i odejmiemy kwotę od wybranego konta.")
                     }
                 }
                 Section {
-                    Picker("Konto (z którego pobierać)", selection: $accountId) {
+                    Picker(type == .income ? "Konto (na które wpływa)" : "Konto (z którego pobierać)", selection: $accountId) {
                         Text("Brak").tag(UUID?.none)
                         ForEach(data.accounts) { a in
                             Text(a.name).tag(Optional(a.id))
@@ -135,7 +179,7 @@ struct AddSubscriptionSheet: View {
                     }
                     Picker("Kategoria", selection: $categoryId) {
                         Text("Brak").tag(UUID?.none)
-                        ForEach(data.categories.filter { $0.type == .expense }) { c in
+                        ForEach(data.categories.filter { $0.type == type }) { c in
                             Label(c.name, systemImage: c.icon).tag(Optional(c.id))
                         }
                     }
@@ -166,6 +210,7 @@ struct AddSubscriptionSheet: View {
                                 categoryId: categoryId,
                                 accountId: accountId,
                                 notes: notes.isEmpty ? nil : notes,
+                                type: type,
                                 firstPaymentDate: firstDate
                             )
                             if let aid = accountId { AppDefaults.lastAccountId = aid }

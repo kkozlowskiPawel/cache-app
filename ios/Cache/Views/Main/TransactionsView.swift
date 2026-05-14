@@ -3,6 +3,7 @@ import SwiftUI
 struct TransactionsView: View {
     @EnvironmentObject var data: DataStore
     @State private var showAdd = false
+    @State private var editing: Transaction?
     @State private var filterCategoryId: UUID?
 
     var filtered: [Transaction] {
@@ -30,6 +31,16 @@ struct TransactionsView: View {
                             Section(DateOnly.date(from: dateStr).formatted(date: .complete, time: .omitted)) {
                                 ForEach(txs) { tx in
                                     TransactionRow(tx: tx)
+                                        .contentShape(Rectangle())
+                                        .onTapGesture { editing = tx }
+                                        .swipeActions(edge: .leading) {
+                                            Button {
+                                                editing = tx
+                                            } label: {
+                                                Label("Edytuj", systemImage: "pencil")
+                                            }
+                                            .tint(.blue)
+                                        }
                                 }
                                 .onDelete { idx in
                                     let toDelete = idx.map { txs[$0] }
@@ -58,7 +69,8 @@ struct TransactionsView: View {
                     Button { showAdd = true } label: { Image(systemName: "plus") }
                 }
             }
-            .sheet(isPresented: $showAdd) { AddTransactionSheet() }
+            .sheet(isPresented: $showAdd) { TransactionEditorSheet(editing: nil) }
+            .sheet(item: $editing) { tx in TransactionEditorSheet(editing: tx) }
             .refreshable { await data.loadAll() }
         }
     }
@@ -91,9 +103,11 @@ private struct TransactionRow: View {
     }
 }
 
-struct AddTransactionSheet: View {
+struct TransactionEditorSheet: View {
     @EnvironmentObject var data: DataStore
     @Environment(\.dismiss) private var dismiss
+
+    let editing: Transaction?
 
     @State private var amount: Double?
     @State private var description = ""
@@ -102,6 +116,9 @@ struct AddTransactionSheet: View {
     @State private var accountId: UUID?
     @State private var isExpense = true
     @State private var justSaved = false
+    @State private var initialized = false
+
+    private var isEdit: Bool { editing != nil }
 
     var body: some View {
         NavigationStack {
@@ -139,22 +156,33 @@ struct AddTransactionSheet: View {
                         }
                     }
                 }
-                Section {
-                    Button {
-                        save(thenAddAnother: true)
-                    } label: {
-                        Label("Zapisz i dodaj kolejny", systemImage: "plus.circle")
-                            .frame(maxWidth: .infinity)
+                if !isEdit {
+                    Section {
+                        Button {
+                            save(thenAddAnother: true)
+                        } label: {
+                            Label("Zapisz i dodaj kolejny", systemImage: "plus.circle")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .disabled((amount ?? 0) <= 0)
                     }
-                    .disabled((amount ?? 0) <= 0)
                 }
             }
-            .navigationTitle("Nowa transakcja")
+            .navigationTitle(isEdit ? "Edytuj transakcję" : "Nowa transakcja")
             .navigationBarTitleDisplayMode(.inline)
             .onAppear {
-                if accountId == nil,
-                   let last = AppDefaults.lastAccountId,
-                   data.accounts.contains(where: { $0.id == last }) {
+                guard !initialized else { return }
+                initialized = true
+                if let tx = editing {
+                    amount = abs(tx.amount)
+                    description = tx.description
+                    date = tx.dateValue
+                    categoryId = tx.category_id
+                    accountId = tx.account_id
+                    isExpense = tx.amount < 0
+                } else if accountId == nil,
+                          let last = AppDefaults.lastAccountId,
+                          data.accounts.contains(where: { $0.id == last }) {
                     accountId = last
                 }
             }
@@ -173,9 +201,13 @@ struct AddTransactionSheet: View {
         guard v > 0 else { return }
         let signed = isExpense ? -abs(v) : abs(v)
         Task {
-            await data.addTransaction(amount: signed, description: description, date: date, categoryId: categoryId, accountId: accountId)
+            if let tx = editing {
+                await data.updateTransaction(tx, amount: signed, description: description, date: date, categoryId: categoryId, accountId: accountId)
+            } else {
+                await data.addTransaction(amount: signed, description: description, date: date, categoryId: categoryId, accountId: accountId)
+            }
             if let aid = accountId { AppDefaults.lastAccountId = aid }
-            if thenAddAnother {
+            if thenAddAnother && !isEdit {
                 amount = nil
                 description = ""
                 justSaved = true

@@ -120,6 +120,7 @@ struct Subscription: Identifiable, Codable, Hashable {
     var color: String
     var active: Bool
     var notes: String?
+    var type: CategoryType
 
     var nextBillingDateValue: Date { DateOnly.date(from: next_billing_date) }
     var monthlyEquivalent: Double { amount * billing_cycle.monthlyFactor }
@@ -187,6 +188,15 @@ struct SubscriptionInsert: Encodable {
     var color: String = "#34C759"
     var active: Bool = true
     var notes: String?
+    var type: CategoryType = .expense
+}
+
+struct TransactionUpdate: Encodable {
+    var account_id: UUID?
+    var category_id: UUID?
+    var amount: Double
+    var description: String
+    var date: String
 }
 
 struct BillInsert: Encodable {
