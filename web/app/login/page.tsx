@@ -64,7 +64,10 @@ export default function LoginPage() {
             {loading ? "Logowanie..." : "Zaloguj się"}
           </button>
           <div className="text-center">
-            <Link href="/forgot-password" className="text-xs text-zinc-500 hover:text-blue-500 hover:underline">
+            <Link
+              href={email ? `/forgot-password?email=${encodeURIComponent(email)}` : "/forgot-password"}
+              className="text-xs text-zinc-500 hover:text-blue-500 hover:underline"
+            >
               Zapomniałeś hasła?
             </Link>
           </div>
