@@ -115,6 +115,7 @@ struct Subscription: Identifiable, Codable, Hashable {
     var billing_cycle: BillingCycle
     var next_billing_date: String
     var category_id: UUID?
+    var account_id: UUID?
     var icon: String
     var color: String
     var active: Bool
@@ -181,6 +182,7 @@ struct SubscriptionInsert: Encodable {
     var billing_cycle: BillingCycle
     var next_billing_date: String
     var category_id: UUID?
+    var account_id: UUID?
     var icon: String = "repeat"
     var color: String = "#34C759"
     var active: Bool = true

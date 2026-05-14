@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useData } from "@/lib/data-context";
 import { formatCurrency, formatDate, todayISO } from "@/lib/format";
 import { BILLING_CYCLE_LABEL, BillingCycle } from "@/lib/types";
+import { getLastAccountId, setLastAccountId } from "@/lib/last-account";
 import Modal, { inputCls, labelCls, btnPrimary, btnSecondary } from "@/components/Modal";
 import { Plus, Pause, Play, Trash2 } from "lucide-react";
 
@@ -35,25 +36,31 @@ export default function SubscriptionsPage() {
         <div className="text-center py-20 text-zinc-500">Brak subskrypcji.</div>
       ) : (
         <ul className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 overflow-hidden divide-y divide-zinc-100 dark:divide-zinc-800">
-          {d.subscriptions.map((s) => (
-            <li key={s.id} className="flex items-center gap-3 px-4 py-3 group">
-              <div className="w-10 h-10 rounded-full flex items-center justify-center" style={{ backgroundColor: s.color + "33", color: s.color }}>
-                <span className="font-bold">{s.name[0]}</span>
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className={`font-medium ${!s.active ? "line-through text-zinc-400" : ""}`}>{s.name}</div>
-                <div className="text-xs text-zinc-500">Następna: {formatDate(s.next_billing_date)}</div>
-              </div>
-              <div className="text-right">
-                <div className="font-semibold">{formatCurrency(s.amount)}</div>
-                <div className="text-xs text-zinc-500">{BILLING_CYCLE_LABEL[s.billing_cycle]}</div>
-              </div>
-              <button onClick={() => d.toggleSubscriptionActive(s)} className="text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200" title={s.active ? "Pauza" : "Wznów"}>
-                {s.active ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
-              </button>
-              <button onClick={() => d.deleteSubscription(s.id)} className="text-zinc-400 hover:text-red-500"><Trash2 className="w-4 h-4" /></button>
-            </li>
-          ))}
+          {d.subscriptions.map((s) => {
+            const acc = d.accountById(s.account_id);
+            return (
+              <li key={s.id} className="flex items-center gap-3 px-4 py-3 group">
+                <div className="w-10 h-10 rounded-full flex items-center justify-center" style={{ backgroundColor: s.color + "33", color: s.color }}>
+                  <span className="font-bold">{s.name[0]}</span>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className={`font-medium ${!s.active ? "line-through text-zinc-400" : ""}`}>{s.name}</div>
+                  <div className="text-xs text-zinc-500">
+                    Następna: {formatDate(s.next_billing_date)}
+                    {acc && <> · {acc.name}</>}
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="font-semibold">{formatCurrency(s.amount)}</div>
+                  <div className="text-xs text-zinc-500">{BILLING_CYCLE_LABEL[s.billing_cycle]}</div>
+                </div>
+                <button onClick={() => d.toggleSubscriptionActive(s)} className="text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200" title={s.active ? "Pauza" : "Wznów"}>
+                  {s.active ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+                </button>
+                <button onClick={() => d.deleteSubscription(s.id)} className="text-zinc-400 hover:text-red-500"><Trash2 className="w-4 h-4" /></button>
+              </li>
+            );
+          })}
         </ul>
       )}
 
@@ -69,14 +76,32 @@ function AddSubscriptionModal({ onClose }: { onClose: () => void }) {
   const [cycle, setCycle] = useState<BillingCycle>("monthly");
   const [nextDate, setNextDate] = useState(todayISO());
   const [categoryId, setCategoryId] = useState("");
+  const [accountId, setAccountId] = useState("");
   const [notes, setNotes] = useState("");
+  const [hasFirstPayment, setHasFirstPayment] = useState(false);
+  const [firstPaymentDate, setFirstPaymentDate] = useState(todayISO());
+
+  useEffect(() => {
+    const last = getLastAccountId();
+    if (last && d.accounts.some((a) => a.id === last)) setAccountId(last);
+  }, [d.accounts]);
 
   const num = parseFloat(amount.replace(",", "."));
   const valid = name.trim() && !isNaN(num) && num > 0;
 
   async function save() {
     if (!valid) return;
-    await d.addSubscription({ name, amount: num, cycle, nextDate, categoryId: categoryId || null, notes: notes || null });
+    await d.addSubscription({
+      name,
+      amount: num,
+      cycle,
+      nextDate,
+      categoryId: categoryId || null,
+      accountId: accountId || null,
+      notes: notes || null,
+      firstPaymentDate: hasFirstPayment ? firstPaymentDate : null,
+    });
+    if (accountId) setLastAccountId(accountId);
     onClose();
   }
 
@@ -86,7 +111,7 @@ function AddSubscriptionModal({ onClose }: { onClose: () => void }) {
       <button onClick={save} disabled={!valid} className={btnPrimary}>Zapisz</button>
     </>}>
       <div className="space-y-3">
-        <div><label className={labelCls}>Nazwa</label><input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} placeholder="np. Netflix" /></div>
+        <div><label className={labelCls}>Nazwa</label><input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} placeholder="np. Netflix" autoFocus /></div>
         <div><label className={labelCls}>Kwota</label><input className={inputCls} inputMode="decimal" placeholder="0,00" value={amount} onChange={(e) => setAmount(e.target.value)} /></div>
         <div><label className={labelCls}>Cykl</label>
           <select className={inputCls} value={cycle} onChange={(e) => setCycle(e.target.value as BillingCycle)}>
@@ -94,6 +119,26 @@ function AddSubscriptionModal({ onClose }: { onClose: () => void }) {
           </select>
         </div>
         <div><label className={labelCls}>Następna płatność</label><input type="date" className={inputCls} value={nextDate} onChange={(e) => setNextDate(e.target.value)} /></div>
+
+        <div className="rounded-lg border border-zinc-200 dark:border-zinc-700 p-3 space-y-2">
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <input type="checkbox" checked={hasFirstPayment} onChange={(e) => setHasFirstPayment(e.target.checked)} />
+            <span>Już zapłaciłem pierwszą ratę (utworzy transakcję historyczną)</span>
+          </label>
+          {hasFirstPayment && (
+            <div>
+              <label className={labelCls}>Data pierwszej płatności</label>
+              <input type="date" className={inputCls} value={firstPaymentDate} onChange={(e) => setFirstPaymentDate(e.target.value)} />
+            </div>
+          )}
+        </div>
+
+        <div><label className={labelCls}>Konto (z którego pobierać)</label>
+          <select className={inputCls} value={accountId} onChange={(e) => setAccountId(e.target.value)}>
+            <option value="">Brak — bez pobierania z konta</option>
+            {d.accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+          </select>
+        </div>
         <div><label className={labelCls}>Kategoria</label>
           <select className={inputCls} value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
             <option value="">Brak</option>

@@ -26,6 +26,8 @@ final class DataStore: ObservableObject {
     func loadAll() async {
         isLoading = true; errorMessage = nil
         defer { isLoading = false }
+        // Najpierw obciaz zalegle subskrypcje (idempotentne w bazie).
+        _ = try? await client.rpc("charge_due_subscriptions").execute()
         do {
             async let cats: [Category] = client.from("categories").select().execute().value
             async let accs: [Account] = client.from("accounts").select().execute().value
@@ -119,18 +121,42 @@ final class DataStore: ObservableObject {
 
     // MARK: - Subscriptions
 
-    func addSubscription(name: String, amount: Double, cycle: BillingCycle, nextDate: Date, categoryId: UUID?, notes: String?) async {
+    func addSubscription(
+        name: String,
+        amount: Double,
+        cycle: BillingCycle,
+        nextDate: Date,
+        categoryId: UUID?,
+        accountId: UUID?,
+        notes: String?,
+        firstPaymentDate: Date? = nil
+    ) async {
         do {
+            let userId = try await currentUserId()
             let row = SubscriptionInsert(
-                user_id: try await currentUserId(),
+                user_id: userId,
                 name: name,
                 amount: amount,
                 billing_cycle: cycle,
                 next_billing_date: DateOnly.string(from: nextDate),
                 category_id: categoryId,
+                account_id: accountId,
                 notes: notes
             )
             try await client.from("subscriptions").insert(row).execute()
+
+            if let firstDate = firstPaymentDate {
+                let tx = TransactionInsert(
+                    user_id: userId,
+                    account_id: accountId,
+                    category_id: categoryId,
+                    amount: -amount,
+                    description: "Subskrypcja: \(name)",
+                    date: DateOnly.string(from: firstDate),
+                    is_recurring: true
+                )
+                try await client.from("transactions").insert(tx).execute()
+            }
         } catch { errorMessage = error.localizedDescription }
     }
 

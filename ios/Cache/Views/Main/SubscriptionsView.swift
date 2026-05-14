@@ -97,7 +97,10 @@ struct AddSubscriptionSheet: View {
     @State private var cycle: BillingCycle = .monthly
     @State private var nextDate = Date()
     @State private var categoryId: UUID?
+    @State private var accountId: UUID?
     @State private var notes = ""
+    @State private var hasFirstPayment = false
+    @State private var firstPaymentDate = Date()
 
     var body: some View {
         NavigationStack {
@@ -113,7 +116,23 @@ struct AddSubscriptionSheet: View {
                     }
                     DatePicker("Następna płatność", selection: $nextDate, displayedComponents: .date)
                 }
-                Section("Dodatkowe") {
+                Section {
+                    Toggle("Już zapłaciłem pierwszą ratę", isOn: $hasFirstPayment)
+                    if hasFirstPayment {
+                        DatePicker("Data pierwszej płatności", selection: $firstPaymentDate, displayedComponents: .date)
+                    }
+                } footer: {
+                    if hasFirstPayment {
+                        Text("Utworzymy transakcję historyczną i odejmiemy kwotę od wybranego konta.")
+                    }
+                }
+                Section {
+                    Picker("Konto (z którego pobierać)", selection: $accountId) {
+                        Text("Brak").tag(UUID?.none)
+                        ForEach(data.accounts) { a in
+                            Text(a.name).tag(Optional(a.id))
+                        }
+                    }
                     Picker("Kategoria", selection: $categoryId) {
                         Text("Brak").tag(UUID?.none)
                         ForEach(data.categories.filter { $0.type == .expense }) { c in
@@ -125,13 +144,31 @@ struct AddSubscriptionSheet: View {
             }
             .navigationTitle("Nowa subskrypcja")
             .navigationBarTitleDisplayMode(.inline)
+            .onAppear {
+                if accountId == nil,
+                   let last = AppDefaults.lastAccountId,
+                   data.accounts.contains(where: { $0.id == last }) {
+                    accountId = last
+                }
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Anuluj") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Zapisz") {
                         let v = amount ?? 0
+                        let firstDate = hasFirstPayment ? firstPaymentDate : nil
                         Task {
-                            await data.addSubscription(name: name, amount: v, cycle: cycle, nextDate: nextDate, categoryId: categoryId, notes: notes.isEmpty ? nil : notes)
+                            await data.addSubscription(
+                                name: name,
+                                amount: v,
+                                cycle: cycle,
+                                nextDate: nextDate,
+                                categoryId: categoryId,
+                                accountId: accountId,
+                                notes: notes.isEmpty ? nil : notes,
+                                firstPaymentDate: firstDate
+                            )
+                            if let aid = accountId { AppDefaults.lastAccountId = aid }
                             dismiss()
                         }
                     }

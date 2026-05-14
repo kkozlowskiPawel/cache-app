@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useData } from "@/lib/data-context";
 import { formatCurrency, formatDate, todayISO } from "@/lib/format";
+import { getLastAccountId, setLastAccountId } from "@/lib/last-account";
 import Modal, { inputCls, labelCls, btnPrimary, btnSecondary } from "@/components/Modal";
 import { Plus, Trash2 } from "lucide-react";
 
@@ -71,29 +72,52 @@ function AddTransactionModal({ onClose }: { onClose: () => void }) {
   const [date, setDate] = useState(todayISO());
   const [categoryId, setCategoryId] = useState<string>("");
   const [accountId, setAccountId] = useState<string>("");
+  const [justSaved, setJustSaved] = useState(false);
+
+  useEffect(() => {
+    const last = getLastAccountId();
+    if (last && d.accounts.some((a) => a.id === last)) setAccountId(last);
+  }, [d.accounts]);
 
   const cats = d.categories.filter((c) => c.type === (isExpense ? "expense" : "income"));
   const num = parseFloat(amount.replace(",", "."));
   const valid = !isNaN(num) && num > 0;
 
-  async function save() {
-    if (!valid) return;
+  async function performSave(): Promise<boolean> {
+    if (!valid) return false;
     const signed = isExpense ? -Math.abs(num) : Math.abs(num);
     await d.addTransaction({ amount: signed, description, date, categoryId: categoryId || null, accountId: accountId || null });
-    onClose();
+    if (accountId) setLastAccountId(accountId);
+    return true;
+  }
+
+  async function saveAndClose() {
+    if (await performSave()) onClose();
+  }
+
+  async function saveAndAddAnother() {
+    if (await performSave()) {
+      // Wyczysc pola wartosci, zachowaj typ/date/kategorie/konto dla szybkiego masowego wpisywania.
+      setAmount("");
+      setDescription("");
+      setJustSaved(true);
+      setTimeout(() => setJustSaved(false), 1500);
+    }
   }
 
   return (
     <Modal open onClose={onClose} title="Nowa transakcja" footer={<>
       <button onClick={onClose} className={btnSecondary}>Anuluj</button>
-      <button onClick={save} disabled={!valid} className={btnPrimary}>Zapisz</button>
+      <button onClick={saveAndAddAnother} disabled={!valid} className={btnSecondary}>Zapisz i dodaj kolejny</button>
+      <button onClick={saveAndClose} disabled={!valid} className={btnPrimary}>Zapisz</button>
     </>}>
       <div className="space-y-3">
+        {justSaved && <div className="text-sm text-green-600 dark:text-green-400">✓ Zapisano — wpisz kolejną</div>}
         <div className="grid grid-cols-2 gap-1 p-1 bg-zinc-100 dark:bg-zinc-800 rounded-lg">
           <button onClick={() => setIsExpense(true)}  className={`py-1.5 rounded-md text-sm font-medium ${isExpense ? "bg-white dark:bg-zinc-700 shadow-sm" : ""}`}>Wydatek</button>
           <button onClick={() => setIsExpense(false)} className={`py-1.5 rounded-md text-sm font-medium ${!isExpense ? "bg-white dark:bg-zinc-700 shadow-sm" : ""}`}>Przychód</button>
         </div>
-        <div><label className={labelCls}>Kwota</label><input className={inputCls} inputMode="decimal" placeholder="0,00" value={amount} onChange={(e) => setAmount(e.target.value)} /></div>
+        <div><label className={labelCls}>Kwota</label><input className={inputCls} inputMode="decimal" placeholder="0,00" value={amount} onChange={(e) => setAmount(e.target.value)} autoFocus /></div>
         <div><label className={labelCls}>Opis</label><input className={inputCls} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="opcjonalnie" /></div>
         <div><label className={labelCls}>Data</label><input className={inputCls} type="date" value={date} onChange={(e) => setDate(e.target.value)} /></div>
         <div><label className={labelCls}>Kategoria</label>

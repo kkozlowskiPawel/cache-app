@@ -101,10 +101,17 @@ struct AddTransactionSheet: View {
     @State private var categoryId: UUID?
     @State private var accountId: UUID?
     @State private var isExpense = true
+    @State private var justSaved = false
 
     var body: some View {
         NavigationStack {
             Form {
+                if justSaved {
+                    Section {
+                        Label("Zapisano — wpisz kolejną", systemImage: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                    }
+                }
                 Section("Typ") {
                     Picker("Typ", selection: $isExpense) {
                         Text("Wydatek").tag(true)
@@ -132,22 +139,50 @@ struct AddTransactionSheet: View {
                         }
                     }
                 }
-            }
-            .navigationTitle("Nowa transakcja")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Anuluj") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Zapisz") {
-                        let v = amount ?? 0
-                        let signed = isExpense ? -abs(v) : abs(v)
-                        Task {
-                            await data.addTransaction(amount: signed, description: description, date: date, categoryId: categoryId, accountId: accountId)
-                            dismiss()
-                        }
+                Section {
+                    Button {
+                        save(thenAddAnother: true)
+                    } label: {
+                        Label("Zapisz i dodaj kolejny", systemImage: "plus.circle")
+                            .frame(maxWidth: .infinity)
                     }
                     .disabled((amount ?? 0) <= 0)
                 }
+            }
+            .navigationTitle("Nowa transakcja")
+            .navigationBarTitleDisplayMode(.inline)
+            .onAppear {
+                if accountId == nil,
+                   let last = AppDefaults.lastAccountId,
+                   data.accounts.contains(where: { $0.id == last }) {
+                    accountId = last
+                }
+            }
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Anuluj") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Zapisz") { save(thenAddAnother: false) }
+                        .disabled((amount ?? 0) <= 0)
+                }
+            }
+        }
+    }
+
+    private func save(thenAddAnother: Bool) {
+        let v = amount ?? 0
+        guard v > 0 else { return }
+        let signed = isExpense ? -abs(v) : abs(v)
+        Task {
+            await data.addTransaction(amount: signed, description: description, date: date, categoryId: categoryId, accountId: accountId)
+            if let aid = accountId { AppDefaults.lastAccountId = aid }
+            if thenAddAnother {
+                amount = nil
+                description = ""
+                justSaved = true
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                justSaved = false
+            } else {
+                dismiss()
             }
         }
     }

@@ -35,7 +35,7 @@ type Ctx = {
   addTransaction: (p: { amount: number; description: string; date: string; categoryId: string | null; accountId: string | null }) => Promise<void>;
   deleteTransaction: (id: string) => Promise<void>;
 
-  addSubscription: (p: { name: string; amount: number; cycle: BillingCycle; nextDate: string; categoryId: string | null; notes: string | null }) => Promise<void>;
+  addSubscription: (p: { name: string; amount: number; cycle: BillingCycle; nextDate: string; categoryId: string | null; accountId: string | null; notes: string | null; firstPaymentDate: string | null }) => Promise<void>;
   toggleSubscriptionActive: (s: Subscription) => Promise<void>;
   deleteSubscription: (id: string) => Promise<void>;
 
@@ -92,6 +92,8 @@ export function DataProvider({ userId, children }: { userId: string; children: R
     let mounted = true;
     (async () => {
       setLoading(true);
+      // Najpierw obciaz zalegle subskrypcje (idempotentne, atomowe w bazie).
+      await supabase.rpc("charge_due_subscriptions");
       await Promise.all([
         refreshTable("categories"),
         refreshTable("accounts"),
@@ -104,7 +106,7 @@ export function DataProvider({ userId, children }: { userId: string; children: R
       if (mounted) setLoading(false);
     })();
     return () => { mounted = false; };
-  }, [refreshTable]);
+  }, [supabase, refreshTable]);
 
   useEffect(() => {
     const tables = ["categories", "accounts", "transactions", "subscriptions", "bills", "budgets", "goals"];
@@ -134,12 +136,23 @@ export function DataProvider({ userId, children }: { userId: string; children: R
   };
   const deleteTransaction = async (id: string) => { await supabase.from("transactions").delete().eq("id", id); };
 
-  const addSubscription = async (p: { name: string; amount: number; cycle: BillingCycle; nextDate: string; categoryId: string | null; notes: string | null }) => {
+  const addSubscription = async (p: { name: string; amount: number; cycle: BillingCycle; nextDate: string; categoryId: string | null; accountId: string | null; notes: string | null; firstPaymentDate: string | null }) => {
     await supabase.from("subscriptions").insert({
       user_id: userId, name: p.name, amount: p.amount,
       billing_cycle: p.cycle, next_billing_date: p.nextDate,
-      category_id: p.categoryId, notes: p.notes,
+      category_id: p.categoryId, account_id: p.accountId, notes: p.notes,
     });
+    if (p.firstPaymentDate) {
+      await supabase.from("transactions").insert({
+        user_id: userId,
+        account_id: p.accountId,
+        category_id: p.categoryId,
+        amount: -p.amount,
+        description: `Subskrypcja: ${p.name}`,
+        date: p.firstPaymentDate,
+        is_recurring: true,
+      });
+    }
   };
   const toggleSubscriptionActive = async (s: Subscription) => { await supabase.from("subscriptions").update({ active: !s.active }).eq("id", s.id); };
   const deleteSubscription = async (id: string) => { await supabase.from("subscriptions").delete().eq("id", id); };

@@ -41,6 +41,7 @@ export interface Subscription {
   billing_cycle: BillingCycle;
   next_billing_date: string;
   category_id: string | null;
+  account_id: string | null;
   icon: string;
   color: string;
   active: boolean;
