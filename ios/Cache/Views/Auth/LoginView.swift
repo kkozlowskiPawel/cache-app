@@ -5,6 +5,7 @@ struct LoginView: View {
     @State private var email = ""
     @State private var password = ""
     @State private var showSignup = false
+    @State private var showForgot = false
 
     var body: some View {
         NavigationStack {
@@ -54,6 +55,10 @@ struct LoginView: View {
                 .padding(.horizontal)
                 .disabled(auth.isLoading || email.isEmpty || password.isEmpty)
 
+                Button("Zapomniałeś hasła?") { showForgot = true }
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+
                 Button("Nie masz konta? Zarejestruj się") { showSignup = true }
                     .font(.footnote)
 
@@ -61,6 +66,9 @@ struct LoginView: View {
             }
             .sheet(isPresented: $showSignup) {
                 SignupView()
+            }
+            .sheet(isPresented: $showForgot) {
+                ForgotPasswordView(prefilledEmail: email)
             }
         }
     }

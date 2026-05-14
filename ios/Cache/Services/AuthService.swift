@@ -83,6 +83,21 @@ final class AuthService: ObservableObject {
         }
     }
 
+    func sendPasswordReset(email: String) async -> Bool {
+        isLoading = true; errorMessage = nil
+        defer { isLoading = false }
+        do {
+            try await SupabaseService.client.auth.resetPasswordForEmail(
+                email,
+                redirectTo: URL(string: "https://cache.kozlowski.download/auth/callback?next=/reset-password")
+            )
+            return true
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
+    }
+
     func deleteAccount() async -> Bool {
         isLoading = true; errorMessage = nil
         defer { isLoading = false }
