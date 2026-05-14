@@ -149,8 +149,10 @@ struct AddBillSheet: View {
                     TextField("Kwota", value: $amount, format: .number).keyboardType(.decimalPad)
                     DatePicker("Termin", selection: $dueDate, displayedComponents: .date)
                 }
-                Section("Przypomnienie") {
+                Section {
                     Stepper("\(reminderDays) dni wcześniej", value: $reminderDays, in: 0...30)
+                } header: {
+                    Text("Przypomnienie")
                 } footer: {
                     Text("Lokalne powiadomienie pojawi się o 9:00 wybranego dnia.")
                 }
