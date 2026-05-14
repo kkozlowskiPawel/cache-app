@@ -26,8 +26,11 @@ export async function updateSession(request: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser();
 
   const pathname = request.nextUrl.pathname;
-  const isAuthPage = pathname === "/login" || pathname === "/signup";
-  const isPublicPath = isAuthPage || pathname.startsWith("/auth");
+  const PUBLIC_PATHS = ["/login", "/signup", "/forgot-password", "/reset-password"];
+  const isPublicPath = PUBLIC_PATHS.includes(pathname) || pathname.startsWith("/auth");
+  // Tylko login/signup wyrzucamy zalogowanych na dashboard — reset-password
+  // moze byc odwiedzony przez zalogowanego usera ktory wraca z linku.
+  const shouldBounceWhenLoggedIn = pathname === "/login" || pathname === "/signup";
 
   if (!user && !isPublicPath) {
     const url = request.nextUrl.clone();
@@ -35,7 +38,7 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  if (user && isAuthPage) {
+  if (user && shouldBounceWhenLoggedIn) {
     const url = request.nextUrl.clone();
     url.pathname = "/dashboard";
     return NextResponse.redirect(url);
